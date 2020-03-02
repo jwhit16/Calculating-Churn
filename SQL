@@ -1,0 +1,151 @@
+ /* Use a select statment to calculate March churn rate as a ratio */
+ SELECT 100. / 2000;
+ 
+ 
+ /* What is the April churn rate as a ratio? */
+ SELECT 450. / 3000;
+ 
+ 
+ /* Use the methodology provided in the narrative to calculate the churn for January 2017. */
+ SELECT 1.0 * 
+(
+  SELECT COUNT(*)
+  FROM subscriptions
+  WHERE subscription_start < '2017-01-01'
+  AND (
+    subscription_end
+    BETWEEN '2017-01-01'
+    AND '2017-01-31'
+  )
+) / (
+  SELECT COUNT(*) 
+  FROM subscriptions 
+  WHERE subscription_start < '2017-01-01'
+  AND (
+    (subscription_end >= '2017-01-01')
+    OR (subscription_end IS NULL)
+  )
+) 
+AS result;
+
+
+/* Use the methodology provided (multi-month fix) in the narrative to calculate the churn for January 2017. */
+WITH enrollments AS
+(SELECT *
+FROM subscriptions
+WHERE subscription_start < '2017-01-01'
+AND (
+  (subscription_end >= '2017-01-01')
+  OR (subscription_end IS NULL)
+)),
+status AS 
+(SELECT
+CASE
+  WHEN (subscription_end > '2017-01-31')
+    OR (subscription_end IS NULL) THEN 0
+    ELSE 1
+  END as is_canceled,
+   CASE
+    WHEN subscription_start < '2017-01-01'
+      AND (
+        (subscription_end >= '2017-01-01')
+        OR (subscription_end IS NULL)
+      ) THEN 1
+    ELSE 0
+  END as is_active
+  FROM enrollments
+  )
+
+SELECT 1.0 * SUM(is_canceled) / SUM(is_active)
+FROM status;
+
+
+/* Create the months temporary table using WITH and SELECT everything from it so that you can see the structure. Months of January, February and March. */
+WITH months AS (
+SELECT
+  '2017-01-01' AS first_day,
+  '2017-01-31' AS last_day
+UNION
+SELECT
+  '2017-02-01' AS first_day,
+  '2017-02-31' AS last_day
+UNION
+SELECT
+  '2017-03-01' AS first_day,
+  '2017-03-31' AS last_day
+  )
+  SELECT *
+  FROM months;
+
+
+/* Create a cross_join temporary table that is a CROSS JOIN of subscriptions and months. */
+cross_join AS 
+(SELECT *
+FROM subscriptions
+CROSS JOIN months
+)
+
+SELECT *
+FROM cross_join
+LIMIT 100;
+
+
+/* Add a status temporary table. */
+Status AS 
+(SELECT cross_join.id, 
+first_day AS month,
+CASE
+  WHEN (subscription_start < first_day)     
+  AND (subscription_end > first_day 
+  OR subscription_end IS NULL)
+  THEN 1
+  ELSE 0
+END AS is_active
+FROM cross_join
+)
+
+SELECT *
+FROM status
+LIMIT 100;
+
+
+/* Add an is_canceled column to the status temporary table. */
+status AS
+(SELECT id, first_day as month,
+CASE
+  WHEN (subscription_start < first_day)
+    AND (
+      subscription_end > first_day
+      OR subscription_end IS NULL
+    ) THEN 1
+  ELSE 0
+END as is_active,
+CASE
+ WHEN (subscription_end BETWEEN first_day AND last_day) THEN 1
+ ELSE 0
+END as is_canceled
+FROM cross_join)
+
+SELECT *
+FROM status
+LIMIT 100;
+
+
+/* Add a status_aggregate temporary table */
+status_aggregate AS
+(SELECT month,
+SUM(is_active) AS active,
+SUM(is_canceled) AS canceled
+FROM status
+GROUP BY month)
+
+SELECT *
+FROM status_aggregate;
+
+
+/* Add a select statement to calculate the churn rate */
+SELECT
+  month,
+  1.0 * (canceled/active) AS churn_rate
+FROM status_aggregate;
+
